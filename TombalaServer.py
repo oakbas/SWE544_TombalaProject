@@ -20,6 +20,8 @@ class ClientThread (threading.Thread):
 
     def incoming_parser(self, data):
 
+        #Todo: Before csoc.send check csoc is connected
+
         #The case, user has already logged in
         if self.nickname:
             #Todo: If check a session is start
@@ -101,16 +103,31 @@ class ClientThread (threading.Thread):
 
             #The case, client registration
             if data[0:3] == "USR":
-                self.nickname = rest
                 #ToDo: nickname validity check(existing or typo error)
-                response = "HEL " + rest
-                self.csoc.send(response)
+                if rest in usernameList:
+                    response = "REJ " + self.nickname
+                    self.csoc.send(response)
+                    self.exitFlag = 1
+                else:
+                    self.nickname = rest
+                    usernameList.append(self.nickname)
+                    response = "HEL " + rest
+                    self.csoc.send(response)
+                    response = "SAY " + self.nickname + " is connected"
+                    messageType = 1
+                    message = Message(messageType,response)
+                    self.sendQueue.put(message)
 
             #The case, client log in
             elif data[0:3] == "LOG":
                 if rest in usernameList:
+                    self.nickname = rest
                     response = "HEL " + rest
                     self.csoc.send(response)
+                    response = "SAY " + self.nickname + " is connected"
+                    messageType = 1
+                    message = Message(messageType,response)
+                    self.sendQueue.put(message)
                 #ToDo: check this user is currently in the system
                 else:
                     response = "REJ"
@@ -158,12 +175,13 @@ class WriteThread (threading.Thread):
                 if queue_message.type == 1:
                     temp = queue_message.message
                     for clientThread in threads:
-                        try:
-                            clientThread.csoc.send(temp)
-                        #Todo: Custom message(session messages)
-                        except socket.error:
-                            self.csoc.close()
-                            break
+                        if clientThread.nickname:
+                            try:
+                                clientThread.csoc.send(temp)
+                            #Todo: Custom message(session messages)
+                            except socket.error:
+                                self.csoc.close()
+                                break
 
 class Message(object):
     def __init__(self, type, messagebody):
