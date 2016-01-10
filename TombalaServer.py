@@ -8,7 +8,7 @@ import threading
 import Queue
 
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads):
+    def __init__(self, threadId, usernameList, csoc, threads, sendQueue):
         threading.Thread.__init__(self)
         self.thredId = threadId
         self.csoc = csoc
@@ -16,6 +16,7 @@ class ClientThread (threading.Thread):
         self.threads = threads
         self.threads.append(self)
         self.exitFlag = 0
+        self.sendQueue = sendQueue
 
     def incoming_parser(self, data):
 
@@ -46,7 +47,6 @@ class ClientThread (threading.Thread):
                 #Todo: Main thread update, usernamelist update
                 response = "BYE " + self.nickname
                 self.csoc.send(response)
-                threads.remove(self)
                 self.exitFlag = 1
                 return
 
@@ -121,12 +121,54 @@ class ClientThread (threading.Thread):
 
     def run(self):
         while True:
-            data = self.csoc.recv(1024)
-            data = data.rstrip('\r\n')
-            self.incoming_parser(data)
-            if self.exitFlag == 1:
+            try:
+                data = self.csoc.recv(1024)
+                data = data.rstrip('\r\n')
+                self.incoming_parser(data)
+                if self.exitFlag == 1:
+                    threads.remove(self)
+                    response = "SAY " + self.nickname + " is disconnected"
+                    messageType = 1
+                    message = Message(messageType,response)
+                    self.sendQueue.put(message)
+                    self.csoc.close()
+                    return
+            except socket.error:
+                threads.remove(self)
+                response = "SAY " + self.nickname + " is disconnected"
+                messageType = 1
+                message = Message(messageType,response)
+                self.sendQueue.put(message)
                 self.csoc.close()
                 return
+
+
+class WriteThread (threading.Thread):
+    def __init__(self, name, usernameList, threads, sendQueue):
+        threading.Thread.__init__(self)
+        self.name = name
+        self.threads = threads
+        self.sendQueue = sendQueue
+
+    def run(self):
+        while True:
+            if self.sendQueue.qsize() > 0:
+                queue_message = self.sendQueue.get()
+                #General Message
+                if queue_message.type == 1:
+                    temp = queue_message.message
+                    for clientThread in threads:
+                        try:
+                            clientThread.csoc.send(temp)
+                        #Todo: Custom message(session messages)
+                        except socket.error:
+                            self.csoc.close()
+                            break
+
+class Message(object):
+    def __init__(self, type, messagebody):
+        self.type = type    #type = 1; send to all, type=0; custom
+        self.message = messagebody
 
 #Main Thread
 ssoc = socket.socket()
@@ -136,9 +178,12 @@ ssoc.bind((host, port))
 threadId = -1
 threads = []
 usernameList = []
-ssoc.listen(5)
-
 sendQueue = Queue.Queue() #Todo: Async case
+
+wt = WriteThread("WriteThread", usernameList, threads, sendQueue)
+wt.start()
+
+ssoc.listen(5)
 
 #Listen Socket
 while True:
@@ -146,8 +191,7 @@ while True:
     print 'Got connection from', addr
     csoc.send('Thank you for connecting!')
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads)
+    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue)
     ct.start()
-    ct.join()
 
 ssoc.close()
