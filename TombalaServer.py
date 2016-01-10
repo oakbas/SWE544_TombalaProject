@@ -7,16 +7,21 @@ import socket
 import threading
 import Queue
 
+SessionNum = 0
+
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads, sendQueue):
+    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict):
         threading.Thread.__init__(self)
         self.thredId = threadId
+        self.usernameList = usernameList
         self.csoc = csoc
         self.nickname = ""
         self.threads = threads
         self.threads.append(self)
         self.exitFlag = 0
         self.sendQueue = sendQueue
+        self.sessionDict = sessionDict
+        self.joinedSession = ""
 
     def incoming_parser(self, data):
 
@@ -53,37 +58,79 @@ class ClientThread (threading.Thread):
                 return
 
             #The case, getting session list request
-            if data[0:3] == "LSS":
+            elif data[0:3] == "LSS":
                 if len(rest) > 0:
                     response = "ERR"
                     self.csoc.send(response)
                     return
                 #Todo: get session list dictionary
-                sessionList = "none"
-                response = "LSA " + sessionList
+                sessionMessage = " "
+                for session in self.sessionDict:
+                    sessionMessage += session + ":"
+                    for thread in self.sessionDict[session]:
+                        sessionMessage += thread.nickname + ','
+                    sessionMessage = sessionMessage[:-1] + ";"
+                sessionMessage = sessionMessage[:-1]
+                response = "LSA" + sessionMessage
                 self.csoc.send(response)
 
             #The case, creating new session request
-            if data[0:3] == "CRT":
+            elif data[0:3] == "CRT":
                 if len(rest) > 0:
                     response = "ERR"
                     self.csoc.send(response)
                     return
-                #Todo: get session list dictionary
-                #Todo: create new session id and add to dictinary and add this in response
-                response = "CAC "
+                #Create new session
+                global SessionNum
+                if self.joinedSession:
+                    response = "CRJ"
+                    self.csoc.send(response)
+                else:
+                    SessionNum += 1
+                    sessionUserList = []
+                    sessionUserList.append(self)
+                    dkey = str(SessionNum)
+                    self.joinedSession = dkey
+                    self.sessionDict[dkey] = sessionUserList
+                    response = "CAC " + dkey
+                    self.csoc.send(response)
 
             #The case, joining existing session request
-            if data[0:3] == "JNS":
+            elif data[0:3] == "JNS":
                 if len(rest) == 0:
                     response = "ERR"
                     self.csoc.send(response)
                 #Todo: check if the game started
                 #Todo: else search sessionId in the dictionary and check it, send response according to it
-                response = "REJ"
+                splitted = rest.split(":")
+                #Wrong type of message
+                if len(splitted) != 2:
+                    response = "REJ"
+                    self.csoc.send(response)
+                    return
+                else:
+                    sessionID = splitted[0]
+                    sentName = splitted[1]
+                    if sessionID in self.sessionDict:
+                        #Wrong username check
+                        if sentName == self.nickname:
+                            #Check if the user has already joined
+                            if self.joinedSession:
+                                response = "REJ"
+                                self.csoc.send(response)
+                                return
+                            else:
+                                self.sessionDict[sessionID].append(self)
+                                response = "ADD " + sessionID
+                                self.csoc.send(response)
+                    #Wrong sessionID
+                    else:
+                        response = "REJ"
+                        self.csoc.send(response)
+            else:
+                response = "ERR"
                 self.csoc.send(response)
-                response = "ADD "
-                self.csoc.send(response)
+                return
 
         #The case, user has not logged in yet
         else:
@@ -104,13 +151,13 @@ class ClientThread (threading.Thread):
             #The case, client registration
             if data[0:3] == "USR":
                 #ToDo: nickname validity check(existing or typo error)
-                if rest in usernameList:
+                if rest in self.usernameList:
                     response = "REJ " + self.nickname
                     self.csoc.send(response)
                     self.exitFlag = 1
                 else:
                     self.nickname = rest
-                    usernameList.append(self.nickname)
+                    self.usernameList.append(self.nickname)
                     response = "HEL " + rest
                     self.csoc.send(response)
                     response = "SAY " + self.nickname + " is connected"
@@ -120,7 +167,7 @@ class ClientThread (threading.Thread):
 
             #The case, client log in
             elif data[0:3] == "LOG":
-                if rest in usernameList:
+                if rest in self.usernameList:
                     self.nickname = rest
                     response = "HEL " + rest
                     self.csoc.send(response)
@@ -196,10 +243,14 @@ ssoc.bind((host, port))
 threadId = -1
 threads = []
 usernameList = []
-sendQueue = Queue.Queue() #Todo: Async case
+sendQueue = Queue.Queue()
 
+#Async message (Todo: thread wait)
 wt = WriteThread("WriteThread", usernameList, threads, sendQueue)
 wt.start()
+
+#Game session init
+sessionDict = {}
 
 ssoc.listen(5)
 
@@ -209,7 +260,7 @@ while True:
     print 'Got connection from', addr
     csoc.send('Thank you for connecting!')
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue)
+    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict)
     ct.start()
 
 ssoc.close()
