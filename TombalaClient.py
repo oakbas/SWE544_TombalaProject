@@ -8,19 +8,20 @@ import threading
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 import Queue
+import datetime
 
 
 # Class Name: ReadThread
 # Description : This class for processing the incoming messages to the socket and
 #               deriving user friendly information from the incoming messages
 class ReadThread (threading.Thread):
-    def __init__(self, name, ssoc, sendQueue, readQueue):
+    def __init__(self, name, ssoc, sendQueue, screenQueue):
         threading.Thread.__init__(self)
         self.name = name
         self.ssoc = ssoc
         self.nickname = ""
         self.sendQueue = sendQueue
-        self.readQueue = readQueue
+        self.screenQueue = screenQueue
 
     def incoming_parser(self, data):
 
@@ -80,7 +81,8 @@ class ReadThread (threading.Thread):
     def run(self):
         while True:
             data = self.ssoc.recv(1024)
-            print(data)
+            print data
+            self.screenQueue.put(data)
             #self.incoming_parser(data)
 
 # Class Name: WriteThread
@@ -101,8 +103,6 @@ class WriteThread (threading.Thread):
                 except socket.error:
                     self.ssoc.close()
                     break
-            x = raw_input("Command: ")
-            self.ssoc.send(x)
 
 class ClientDialog(QDialog):
 
@@ -139,7 +139,7 @@ class ClientDialog(QDialog):
         self.send_button = QPushButton('&Send')
 
         # Connect the Go button to its callback
-        #self.send_button.clicked.connect(self.outgoing_parser)
+        self.send_button.clicked.connect(self.outgoing_parser)
 
         # Add the controls to the vertical layout
         self.vbox.addLayout(self.hbox)
@@ -147,8 +147,32 @@ class ClientDialog(QDialog):
         self.vbox.addWidget(self.send_button)
         self.hbox.addWidget(self.channel)
 
+        # start timer
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.updateChannelWindow)
+
+        # update every 10 ms
+        self.timer.start(10)
+
         # Use the vertical layout for the current window
         self.setLayout(self.vbox)
+
+    # use this to append new message to channel with timestamp
+    def cprint(self, data):
+        now = datetime.datetime.strftime(datetime.datetime.now(), '%H:%M:%S')
+        channel_msg = now + " " + data
+        self.channel.append(channel_msg)
+
+    def updateChannelWindow(self):
+        if self.screenQueue.qsize() > 0:
+            queue_message = self.screenQueue.get()
+            self.cprint(queue_message)
+
+    def outgoing_parser(self):
+        data = self.sender.text()
+
+        self.sendQueue.put(data)
+        self.sender.clear()
 
     #Run the app and show the main form
     def run(self):
@@ -166,10 +190,9 @@ readQueue = Queue.Queue()
 screenQueue = Queue.Queue()
 
 app = ClientDialog(sendQueue, screenQueue)
-# start threads
 
 # start threads
-rt = ReadThread("ReadThread", ssoc, sendQueue, readQueue)
+rt = ReadThread("ReadThread", ssoc, sendQueue, screenQueue)
 rt.start()
 wt = WriteThread("WriteThread", ssoc, sendQueue)
 wt.start()
