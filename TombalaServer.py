@@ -8,9 +8,10 @@ import threading
 import Queue
 
 SessionNum = 0
+gameStarted = 0
 
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict):
+    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameThread):
         threading.Thread.__init__(self)
         self.thredId = threadId
         self.usernameList = usernameList
@@ -22,137 +23,206 @@ class ClientThread (threading.Thread):
         self.sendQueue = sendQueue
         self.sessionDict = sessionDict
         self.joinedSession = ""
+        self.gameThread = gameThread
+        self.readyFlag = False
 
     def incoming_parser(self, data):
 
         #Todo: Before csoc.send check csoc is connected
-
         #The case, user has already logged in
         if self.nickname:
-            #Todo: If check a session is start
-            #ToDo: Implement All Protocol Messages
-            #The case, message has less than three-character length
-            if len(data) < 3:
-                response = "ERR"
-                self.csoc.send(response)
-                return
+            global gameStarted
 
-            #The case, command root is more than three characters
-            if len(data) > 3 and not data[3] == " ":
-                response = "ERR"
-                self.csoc.send(response)
-                return
-
-            rest = data[4:]     #get the rest of the message, no problem even if data < 4
-
-            #The case, communication ends
-            if data[0:3] == "QUI":
-                if len(rest) > 0:
+            #The case, game starts
+            if gameStarted:
+                #The case, message has less than three-character length
+                if len(data) < 3:
                     response = "ERR"
                     self.csoc.send(response)
                     return
-                #Todo: Main thread update, usernamelist update
-                response = "BYE " + self.nickname
-                self.csoc.send(response)
-                self.exitFlag = 1
-                return
 
-            #The case, getting session list request
-            elif data[0:3] == "LSS":
-                if len(rest) > 0:
+                #The case, command root is more than three characters
+                if len(data) > 3 and not data[3] == " ":
                     response = "ERR"
                     self.csoc.send(response)
                     return
-                #Todo: get session list dictionary
-                sessionMessage = " "
-                for session in self.sessionDict:
-                    sessionMessage += session + ":"
-                    for thread in self.sessionDict[session]:
-                        sessionMessage += thread.nickname + ','
-                    sessionMessage = sessionMessage[:-1] + ";"
-                sessionMessage = sessionMessage[:-1]
-                response = "LSA" + sessionMessage
-                self.csoc.send(response)
 
-            #The case, creating new session request
-            elif data[0:3] == "CRT":
-                if len(rest) > 0:
+                rest = data[4:]     #get the rest of the message, no problem even if data < 4
+
+                #The case, communication ends
+                if data[0:3] == "RDY":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Keep game thread (includes card, situation, ready for next)
+                    self.readyFlag = True
+
+                #The case, cinko request
+                if data[0:3] == "CNK":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Cinko check
+                    response = "CNA"
+                    response = "CNR"
+
+                #The case, tombala request
+                if data[0:3] == "TBL":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Tombala check
+                    response = "TBA"
+                    response = "TBR"
+
+                #The case, tombala request
+                if data[0:3] == "TBL":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Tombala check
+                    response = "TBA"
+                    response = "TBR"
+
+                #The case, situation information request
+                if data[0:3] == "QRY":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Take situation from gameThread
+                    response = "INF"
+
+            #The case, game has not started yet
+            else:
+                #Todo: If check a session is start
+                #ToDo: Implement All Protocol Messages
+                #The case, message has less than three-character length
+                if len(data) < 3:
                     response = "ERR"
                     self.csoc.send(response)
                     return
-                #Create new session
-                global SessionNum
-                if self.joinedSession:
-                    response = "CSR"
-                    self.csoc.send(response)
-                else:
-                    SessionNum += 1
-                    sessionUserList = []
-                    sessionUserList.append(self)
-                    dkey = str(SessionNum)
-                    self.joinedSession = dkey
-                    self.sessionDict[dkey] = sessionUserList
-                    response = "CSA " + dkey
-                    self.csoc.send(response)
 
-            #The case, joining existing session request
-            elif data[0:3] == "JNS":
-                if len(rest) == 0:
+                #The case, command root is more than three characters
+                if len(data) > 3 and not data[3] == " ":
                     response = "ERR"
                     self.csoc.send(response)
-                #Todo: check if the game started
-                #Todo: else search sessionId in the dictionary and check it, send response according to it
-                splitted = rest.split(":")
-                #Wrong type of message
-                if len(splitted) != 2:
-                    response = "JNR"
-                    self.csoc.send(response)
                     return
-                else:
-                    sessionID = splitted[0]
-                    sentName = splitted[1]
-                    if sessionID in self.sessionDict:
-                        #Wrong username check
-                        if sentName == self.nickname:
-                            #Check if the user has already joined
-                            if self.joinedSession:
-                                response = "JNR"
-                                self.csoc.send(response)
-                                return
-                            else:
-                                self.sessionDict[sessionID].append(self)
-                                response = "JNA " + sessionID
-                                self.csoc.send(response)
-                    #Wrong sessionID
+
+                rest = data[4:]     #get the rest of the message, no problem even if data < 4
+
+                #The case, communication ends
+                if data[0:3] == "QUI":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: Main thread update, usernamelist update
+                    response = "BYE " + self.nickname
+                    self.csoc.send(response)
+                    self.exitFlag = 1
+                    return
+
+                #The case, getting session list request
+                elif data[0:3] == "LSS":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Todo: get session list dictionary
+                    sessionMessage = " "
+                    for session in self.sessionDict:
+                        sessionMessage += session + ":"
+                        for thread in self.sessionDict[session]:
+                            sessionMessage += thread.nickname + ','
+                        sessionMessage = sessionMessage[:-1] + ";"
+                    sessionMessage = sessionMessage[:-1]
+                    response = "LSA" + sessionMessage
+                    self.csoc.send(response)
+
+                #The case, creating new session request
+                elif data[0:3] == "CRT":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Create new session
+                    global SessionNum
+                    if self.joinedSession:
+                        response = "CSR"
+                        self.csoc.send(response)
                     else:
-                        response = "JNR"
+                        SessionNum += 1
+                        sessionUserList = []
+                        sessionUserList.append(self)
+                        dkey = str(SessionNum)
+                        self.joinedSession = dkey
+                        self.sessionDict[dkey] = sessionUserList
+                        response = "CSA " + dkey
                         self.csoc.send(response)
 
-            #The case, exit from session requests
-            elif data[0:3] == "QGM":
-                if len(rest) > 0:
+                #The case, joining existing session request
+                elif data[0:3] == "JNS":
+                    if len(rest) == 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                    #Todo: check if the game started
+                    #Todo: else search sessionId in the dictionary and check it, send response according to it
+                    splitted = rest.split(":")
+                    #Wrong type of message
+                    if len(splitted) != 2:
+                        response = "JNR"
+                        self.csoc.send(response)
+                        return
+                    else:
+                        sessionID = splitted[0]
+                        sentName = splitted[1]
+                        if sessionID in self.sessionDict:
+                            #Wrong username check
+                            if sentName == self.nickname:
+                                #Check if the user has already joined
+                                if self.joinedSession:
+                                    response = "JNR"
+                                    self.csoc.send(response)
+                                    return
+                                else:
+                                    self.sessionDict[sessionID].append(self)
+                                    response = "JNA " + sessionID
+                                    self.csoc.send(response)
+                        #Wrong sessionID
+                        else:
+                            response = "JNR"
+                            self.csoc.send(response)
+
+                #The case, exit from session requests
+                elif data[0:3] == "QGM":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    #Not registered a session
+                    if self.joinedSession:
+                        response = "QGA"
+                        self.csoc.send(response)
+                        for self.joinedSession in self.sessionDict:
+                            self.sessionDict[self.joinedSession].remove(self)
+                            break
+                        for self.joinedSession in self.sessionDict:
+                            self.sessionDict.pop(self.joinedSession,None)
+                            self.joinedSession = ""
+                            break
+                    else:
+                        response = "QGR"
+                        self.csoc.send(response)
+
+                else:
                     response = "ERR"
                     self.csoc.send(response)
                     return
-                #Not registered a session
-                if self.joinedSession:
-                    response = "QGA"
-                    self.csoc.send(response)
-                    for self.joinedSession in self.sessionDict:
-                        self.sessionDict[self.joinedSession].remove(self)
-                        break
-                    for self.joinedSession in self.sessionDict:
-                        self.sessionDict.pop(self.joinedSession,None)
-                        self.joinedSession = ""
-                        break
-                else:
-                    response = "QGR"
-                    self.csoc.send(response)
-
-            else:
-                response = "ERR"
-                self.csoc.send(response)
-                return
 
         #The case, user has not logged in yet
         else:
@@ -274,6 +344,9 @@ wt.start()
 #Game session init
 sessionDict = {}
 
+#Threads who are playing in the game
+gameThread = []
+
 ssoc.listen(5)
 
 #Listen Socket
@@ -282,7 +355,7 @@ while True:
     print 'Got connection from', addr
     csoc.send('Thank you for connecting!')
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict)
+    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameThread)
     ct.start()
 
 ssoc.close()
