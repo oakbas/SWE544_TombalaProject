@@ -83,7 +83,7 @@ class ClientThread (threading.Thread):
                 #Create new session
                 global SessionNum
                 if self.joinedSession:
-                    response = "CRJ"
+                    response = "CSR"
                     self.csoc.send(response)
                 else:
                     SessionNum += 1
@@ -92,7 +92,7 @@ class ClientThread (threading.Thread):
                     dkey = str(SessionNum)
                     self.joinedSession = dkey
                     self.sessionDict[dkey] = sessionUserList
-                    response = "CAC " + dkey
+                    response = "CSA " + dkey
                     self.csoc.send(response)
 
             #The case, joining existing session request
@@ -105,7 +105,7 @@ class ClientThread (threading.Thread):
                 splitted = rest.split(":")
                 #Wrong type of message
                 if len(splitted) != 2:
-                    response = "REJ"
+                    response = "JNR"
                     self.csoc.send(response)
                     return
                 else:
@@ -116,17 +116,39 @@ class ClientThread (threading.Thread):
                         if sentName == self.nickname:
                             #Check if the user has already joined
                             if self.joinedSession:
-                                response = "REJ"
+                                response = "JNR"
                                 self.csoc.send(response)
                                 return
                             else:
                                 self.sessionDict[sessionID].append(self)
-                                response = "ADD " + sessionID
+                                response = "JNA " + sessionID
                                 self.csoc.send(response)
                     #Wrong sessionID
                     else:
-                        response = "REJ"
+                        response = "JNR"
                         self.csoc.send(response)
+
+            #The case, exit from session requests
+            elif data[0:3] == "QGM":
+                if len(rest) > 0:
+                    response = "ERR"
+                    self.csoc.send(response)
+                    return
+                #Not registered a session
+                if self.joinedSession:
+                    response = "QGA"
+                    self.csoc.send(response)
+                    for self.joinedSession in self.sessionDict:
+                        self.sessionDict[self.joinedSession].remove(self)
+                        break
+                    for self.joinedSession in self.sessionDict:
+                        self.sessionDict.pop(self.joinedSession,None)
+                        self.joinedSession = ""
+                        break
+                else:
+                    response = "QGR"
+                    self.csoc.send(response)
+
             else:
                 response = "ERR"
                 self.csoc.send(response)
