@@ -6,12 +6,38 @@ import sys
 import socket
 import threading
 import Queue
+import random
 
 SessionNum = 0
-gameStarted = 0
+gameStart = ""
+
+def createCards():
+    tombalaCardList = []
+    tombalaCard0 = [[1,20,40,64,71],[10,30,56,79,88],[2,23,46,68,87]]
+    tombalaCardList.append(tombalaCard0)
+    tombalaCard1 = [[7,26,46,63,72],[15,34,56,76,86],[5,22,48,62,89]]
+    tombalaCardList.append(tombalaCard1)
+    tombalaCard2 = [[8,10,36,50,71],[15,26,40,60,83],[2,21,39,56,74]]
+    tombalaCardList.append(tombalaCard2)
+    tombalaCard3 = [[1,25,44,63,74],[20,40,54,85,86],[7,26,51,69,87]]
+    tombalaCardList.append(tombalaCard3)
+    tombalaCard4 = [[1,25,45,63,71],[15,39,53,79,82],[3,29,48,65,90]]
+    tombalaCardList.append(tombalaCard4)
+    tombalaCard5 = [[2,23,45,64,71],[18,32,58,78,80],[5,25,49,69,86]]
+    tombalaCardList.append(tombalaCard5)
+    tombalaCard6 = [[2,23,43,60,74],[12,32,53,79,80],[5,20,49,69,84]]
+    tombalaCardList.append(tombalaCard6)
+    tombalaCard7 = [[7,23,41,63,89],[12,24,44,65,78],[5,16,32,56,90]]
+    tombalaCardList.append(tombalaCard7)
+    tombalaCard8 = [[3,12,30,53,73],[16,21,41,61,87],[9,24,35,57,70]]
+    tombalaCardList.append(tombalaCard8)
+    tombalaCard9 = [[9,12,34,54,73],[19,24,44,66,84],[9,24,35,57,70]]
+    tombalaCardList.append(tombalaCard9)
+
+    return tombalaCardList
 
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameThread):
+    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict):
         threading.Thread.__init__(self)
         self.thredId = threadId
         self.usernameList = usernameList
@@ -23,18 +49,18 @@ class ClientThread (threading.Thread):
         self.sendQueue = sendQueue
         self.sessionDict = sessionDict
         self.joinedSession = ""
-        self.gameThread = gameThread
         self.readyFlag = False
+        self.sessionTimer = sessionTimer
+        self.inGame = False
+        global gameStart
 
     def incoming_parser(self, data):
 
         #Todo: Before csoc.send check csoc is connected
         #The case, user has already logged in
         if self.nickname:
-            global gameStarted
-
-            #The case, game starts
-            if gameStarted:
+            #The case game has started
+            if gameStart and self.inGame:
                 #The case, message has less than three-character length
                 if len(data) < 3:
                     response = "ERR"
@@ -49,9 +75,9 @@ class ClientThread (threading.Thread):
 
                 rest = data[4:]     #get the rest of the message, no problem even if data < 4
 
-                #The case, communication ends
+                #The case, gamer ready for new number
                 if data[0:3] == "RDY":
-                    if len(rest) > 0:
+                    if len(rest) == 0:
                         response = "ERR"
                         self.csoc.send(response)
                         return
@@ -60,7 +86,7 @@ class ClientThread (threading.Thread):
 
                 #The case, cinko request
                 if data[0:3] == "CNK":
-                    if len(rest) > 0:
+                    if len(rest) == 0:
                         response = "ERR"
                         self.csoc.send(response)
                         return
@@ -70,7 +96,7 @@ class ClientThread (threading.Thread):
 
                 #The case, tombala request
                 if data[0:3] == "TBL":
-                    if len(rest) > 0:
+                    if len(rest) == 0:
                         response = "ERR"
                         self.csoc.send(response)
                         return
@@ -97,9 +123,8 @@ class ClientThread (threading.Thread):
                     #Todo: Take situation from gameThread
                     response = "INF"
 
-            #The case, game has not started yet
+            #The case, game has not started
             else:
-                #Todo: If check a session is start
                 #ToDo: Implement All Protocol Messages
                 #The case, message has less than three-character length
                 if len(data) < 3:
@@ -193,6 +218,14 @@ class ClientThread (threading.Thread):
                                     self.sessionDict[sessionID].append(self)
                                     response = "JNA " + sessionID
                                     self.csoc.send(response)
+                                    self.joinedSession = sessionID
+                                    if len(sessionDict[sessionID]) == 2:
+                                        gameStart = sessionID
+                                        response = "SAY " + "Ready for start message"
+                                        messageType = 1
+                                        message = Message(messageType,response)
+                                        self.sendQueue.put(message)
+
                         #Wrong sessionID
                         else:
                             response = "JNR"
@@ -210,15 +243,21 @@ class ClientThread (threading.Thread):
                         self.csoc.send(response)
                         for self.joinedSession in self.sessionDict:
                             self.sessionDict[self.joinedSession].remove(self)
+                            if not self.sessionDict[self.joinedSession]:
+                                self.sessionDict.pop(self.joinedSession,None)
                             break
-                        for self.joinedSession in self.sessionDict:
-                            self.sessionDict.pop(self.joinedSession,None)
-                            self.joinedSession = ""
-                            break
+                        self.joinedSession = ""
                     else:
                         response = "QGR"
                         self.csoc.send(response)
 
+                #The case ready to game
+                elif data[0:3] == "STA":
+                    if len(rest) == 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    self.inGame = True
                 else:
                     response = "ERR"
                     self.csoc.send(response)
@@ -300,11 +339,13 @@ class ClientThread (threading.Thread):
 
 
 class WriteThread (threading.Thread):
-    def __init__(self, name, usernameList, threads, sendQueue):
+    def __init__(self, name, usernameList, threads, sendQueue, sessionDict):
         threading.Thread.__init__(self)
         self.name = name
         self.threads = threads
         self.sendQueue = sendQueue
+        self.sessionDict = sessionDict
+        global gameStart
 
     def run(self):
         while True:
@@ -322,6 +363,18 @@ class WriteThread (threading.Thread):
                                 self.csoc.close()
                                 break
 
+                    if gameStart:
+                        cards = createCards()
+                        cards = random.shuffle(cards)
+
+                        #Threads who are playing in the game
+                        gameThread = self.sessionDict[gameStart]
+                        self.sessionDict = {}
+
+                        for clientThread in gameThread:
+                            clientThread.csoc.send("STR " + gameStart)
+
+
 class Message(object):
     def __init__(self, type, messagebody):
         self.type = type    #type = 1; send to all, type=0; custom
@@ -337,15 +390,16 @@ threads = []
 usernameList = []
 sendQueue = Queue.Queue()
 
-#Async message (Todo: thread wait)
-wt = WriteThread("WriteThread", usernameList, threads, sendQueue)
-wt.start()
-
 #Game session init
 sessionDict = {}
+sessionTimer = {}
 
-#Threads who are playing in the game
 gameThread = []
+
+#Async message (Todo: thread wait)
+wt = WriteThread("WriteThread", usernameList, threads, sendQueue, sessionDict)
+wt.start()
+
 
 ssoc.listen(5)
 
@@ -355,7 +409,7 @@ while True:
     print 'Got connection from', addr
     csoc.send('Thank you for connecting!')
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameThread)
+    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict)
     ct.start()
 
 ssoc.close()
