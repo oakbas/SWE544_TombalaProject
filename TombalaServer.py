@@ -7,37 +7,136 @@ import socket
 import threading
 import Queue
 import random
+import time
 
 SessionNum = 0
-gameStart = ""
+gameSessionId = ""
+gameStart = False
 
-def createCards():
-    tombalaCardList = []
-    tombalaCard0 = [[1,20,40,64,71],[10,30,56,79,88],[2,23,46,68,87]]
-    tombalaCardList.append(tombalaCard0)
-    tombalaCard1 = [[7,26,46,63,72],[15,34,56,76,86],[5,22,48,62,89]]
-    tombalaCardList.append(tombalaCard1)
-    tombalaCard2 = [[8,10,36,50,71],[15,26,40,60,83],[2,21,39,56,74]]
-    tombalaCardList.append(tombalaCard2)
-    tombalaCard3 = [[1,25,44,63,74],[20,40,54,85,86],[7,26,51,69,87]]
-    tombalaCardList.append(tombalaCard3)
-    tombalaCard4 = [[1,25,45,63,71],[15,39,53,79,82],[3,29,48,65,90]]
-    tombalaCardList.append(tombalaCard4)
-    tombalaCard5 = [[2,23,45,64,71],[18,32,58,78,80],[5,25,49,69,86]]
-    tombalaCardList.append(tombalaCard5)
-    tombalaCard6 = [[2,23,43,60,74],[12,32,53,79,80],[5,20,49,69,84]]
-    tombalaCardList.append(tombalaCard6)
-    tombalaCard7 = [[7,23,41,63,89],[12,24,44,65,78],[5,16,32,56,90]]
-    tombalaCardList.append(tombalaCard7)
-    tombalaCard8 = [[3,12,30,53,73],[16,21,41,61,87],[9,24,35,57,70]]
-    tombalaCardList.append(tombalaCard8)
-    tombalaCard9 = [[9,12,34,54,73],[19,24,44,66,84],[9,24,35,57,70]]
-    tombalaCardList.append(tombalaCard9)
+class GameThread (threading.Thread):
+    def __init__(self, name, sessionDict, gameStart, gameSessionId, sendQueue):
+        threading.Thread.__init__(self)
+        self.name
+        self.sessionDict = sessionDict
+        self.gameStart = gameStart
+        self.gameState = 0
+        self.gameSessionId = gameSessionId
+        self.sendQueue = sendQueue
 
-    return tombalaCardList
+    def createCards(self):
+        tombalaCardList = []
+        tombalaCard0 = [['1','20','40','64','71'],['10','30','56','79','88'],['2','23','46','68','87']]
+        tombalaCardList.append(tombalaCard0)
+        tombalaCard1 = [['7','26','46','63','72'],['15','34','56','76','86'],['5','22','48','62','89']]
+        tombalaCardList.append(tombalaCard1)
+        tombalaCard2 = [['8','10','36','50','71'],['15','26','40','60','83'],['2','21','39','56','74']]
+        tombalaCardList.append(tombalaCard2)
+        tombalaCard3 = [['1','25','44','63','74'],['20','40','54','85','86'],['7','26','51','69','87']]
+        tombalaCardList.append(tombalaCard3)
+        tombalaCard4 = [['1','25','45','63','71'],['15','39','53','79','82'],['3','29','48','65','90']]
+        tombalaCardList.append(tombalaCard4)
+        tombalaCard5 = [['2','23','45','64','71'],['18','32','58','78','80'],['5','25','49','69','86']]
+        tombalaCardList.append(tombalaCard5)
+        tombalaCard6 = [['2','23','43','60','74'],['12','32','53','79','80'],['5','20','49','69','84']]
+        tombalaCardList.append(tombalaCard6)
+        tombalaCard7 = [['7','23','41','63','89'],['12','24','44','65','78'],['5','16','32','56','90']]
+        tombalaCardList.append(tombalaCard7)
+        tombalaCard8 = [['3','12','30','53','73'],['16','21','41','61','87'],['9','24','35','57','70']]
+        tombalaCardList.append(tombalaCard8)
+        tombalaCard9 = [['9','12','34','54','73'],['19','24','44','66','84'],['9','24','35','57','70']]
+        tombalaCardList.append(tombalaCard9)
+
+        random.shuffle(tombalaCardList)
+        return tombalaCardList
+
+    def randomNumber(self):
+        luckyNum = range(1,91,1)
+        random.shuffle(luckyNum)
+        return luckyNum
+
+    def run(self):
+        counter = 0
+        luckNumbers = []
+        nextNumIndex = 0
+        while True:
+            #The state, to control if a session meets requirement
+            if self.gameState == 0:
+                for session in self.sessionDict:
+                    if len(self.sessionDict[session]) >= 2:
+                        self.gameSessionId = session
+                        response = "STR " + session
+                        messageType = 1
+                        message = Message(messageType,response)
+                        self.sendQueue.put(message)
+                        self.gameState = 1
+                    else:
+                        time.sleep(5)
+            elif self.gameState == 1:
+                result = True
+                for gamer in self.sessionDict[self.gameSessionId]:
+                    result &= gamer.inGame
+                if result:
+                    self.gameState = 2
+                    global gameStart
+                    gameStart = True
+                    luckNumbers = self.randomNumber()
+                    nextNumIndex = 0
+                else:
+                    time.sleep(5)
+                    counter += 1
+                    if counter == 3:
+                        self.gameState = 0
+                        self.gameStart = False
+                        self.gameSessionId = ""
+            elif self.gameState == 2:
+                cardList = self.createCards()
+                i = 0
+                messageBody = ""
+                for gamer in self.sessionDict[self.gameSessionId]:
+                    gamer.card = cardList[i]
+                    i += 1
+                    messageBody += gamer.nickname + ":"
+                    for row in gamer.card:
+                        messageBody += '-'.join(row)
+                        messageBody += ","
+                    messageBody = messageBody[:-1]
+                    messageBody += ";"
+                messageBody = messageBody[:-1]
+
+                self.gameState = 3
+
+                for gamer in self.sessionDict[self.gameSessionId]:
+                    response = "APC " + messageBody
+                    messageType = 0
+                    message = Message(messageType,response, gamer)
+                    self.sendQueue.put(message)
+
+            elif self.gameState == 3:
+                result = True
+                for gamer in self.sessionDict[self.gameSessionId]:
+                    result &= gamer.readyFlag
+                if result:
+                    lck = luckNumbers[nextNumIndex]
+                    nextNumIndex += 1
+                    response = "NMB " + str(lck)
+                    messageType = 0
+                    message = Message(messageType,response)
+                    for gamer in self.sessionDict[self.gameSessionId]:
+                        gamer.coverNum(str(lck))
+                        message = Message(messageType,response,gamer)
+                        gamer.readyFlag = False
+                        self.sendQueue.put(message)
+
+                else:
+                    time.sleep(5)
+                    counter += 1
+                    if counter == 3:
+                        self.gameState = 0
+                        self.gameStart = False
+                        self.gameSessionId = ""
 
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict):
+    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, gameStart, card):
         threading.Thread.__init__(self)
         self.thredId = threadId
         self.usernameList = usernameList
@@ -49,10 +148,38 @@ class ClientThread (threading.Thread):
         self.sendQueue = sendQueue
         self.sessionDict = sessionDict
         self.joinedSession = ""
-        self.readyFlag = False
         self.sessionTimer = sessionTimer
         self.inGame = False
-        global gameStart
+        self.readyFlag = False
+        self.fc = False
+        self.sc = False
+        self.tmb = False
+        self.gameSessionId = gameSessionId
+        self.gameStart = gameStart
+        self.card = card
+
+    def coverNum(self, num):
+        for row in self.card:
+            for item in row:
+                if item == str(num):
+                    item = '0'
+        self.checkCnk()
+
+    def checkCnk(self):
+        cnkCounter = 0
+        for row in self.card:
+            if ''.join(row) == "00000":
+                cnkCounter +=1
+        if cnkCounter == 1:
+            self.fc = True
+        elif cnkCounter == 2:
+            self.sc = True
+        elif cnkCounter == 3:
+            self.tmb = True
+        else:
+            self.fc = False
+            self.sc = False
+            self.tmb = False
 
     def incoming_parser(self, data):
 
@@ -60,7 +187,8 @@ class ClientThread (threading.Thread):
         #The case, user has already logged in
         if self.nickname:
             #The case game has started
-            if gameStart and self.inGame:
+            global gameStart
+            if gameStart:
                 #The case, message has less than three-character length
                 if len(data) < 3:
                     response = "ERR"
@@ -90,9 +218,17 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: Cinko check
-                    response = "CNA"
-                    response = "CNR"
+
+                    #Cinko check
+                    if rest[0] == "1":
+                        if self.fc:
+                            response = "CNA"
+                    if rest[1] == "2":
+                        if self.sc:
+                            response = "CNR"
+                    self.csoc.send(response)
+
+                    self.readyFlag = True
 
                 #The case, tombala request
                 if data[0:3] == "TBL":
@@ -100,19 +236,13 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: Tombala check
-                    response = "TBA"
-                    response = "TBR"
-
-                #The case, tombala request
-                if data[0:3] == "TBL":
-                    if len(rest) > 0:
-                        response = "ERR"
-                        self.csoc.send(response)
-                        return
-                    #Todo: Tombala check
-                    response = "TBA"
-                    response = "TBR"
+                    #Tombala check
+                    if self.tmb:
+                        response = "TBA"
+                    else:
+                        response = "TBR"
+                    #General message for accept
+                    self.csoc.send(response)
 
                 #The case, situation information request
                 if data[0:3] == "QRY":
@@ -216,15 +346,16 @@ class ClientThread (threading.Thread):
                                     return
                                 else:
                                     self.sessionDict[sessionID].append(self)
+                                    self.joinedSession = sessionID
                                     response = "JNA " + sessionID
                                     self.csoc.send(response)
-                                    self.joinedSession = sessionID
-                                    if len(sessionDict[sessionID]) == 2:
-                                        gameStart = sessionID
-                                        response = "SAY " + "Ready for start message"
-                                        messageType = 1
-                                        message = Message(messageType,response)
-                                        self.sendQueue.put(message)
+                                    #Todo: may be removed
+                                    #if len(sessionDict[sessionID]) == 2:
+                                     #   self.gameSessionId = sessionID
+                                      #  response = "STR " + sessionID
+                                       # messageType = 1
+                                       # message = Message(messageType,response)
+                                       # self.sendQueue.put(message)
 
                         #Wrong sessionID
                         else:
@@ -253,7 +384,7 @@ class ClientThread (threading.Thread):
 
                 #The case ready to game
                 elif data[0:3] == "STA":
-                    if len(rest) == 0:
+                    if len(rest) > 0:
                         response = "ERR"
                         self.csoc.send(response)
                         return
@@ -319,15 +450,18 @@ class ClientThread (threading.Thread):
             try:
                 data = self.csoc.recv(1024)
                 data = data.rstrip('\r\n')
-                self.incoming_parser(data)
-                if self.exitFlag == 1:
-                    threads.remove(self)
-                    response = "SAY " + self.nickname + " is disconnected"
-                    messageType = 1
-                    message = Message(messageType,response)
-                    self.sendQueue.put(message)
-                    self.csoc.close()
-                    return
+                if self.gameSessionId and not self.inGame:
+                    self.csoc.send("OUT")
+                else:
+                    self.incoming_parser(data)
+                    if self.exitFlag == 1:
+                        threads.remove(self)
+                        response = "SAY " + self.nickname + " is disconnected"
+                        messageType = 1
+                        message = Message(messageType,response)
+                        self.sendQueue.put(message)
+                        self.csoc.close()
+                        return
             except socket.error:
                 threads.remove(self)
                 response = "SAY " + self.nickname + " is disconnected"
@@ -339,13 +473,13 @@ class ClientThread (threading.Thread):
 
 
 class WriteThread (threading.Thread):
-    def __init__(self, name, usernameList, threads, sendQueue, sessionDict):
+    def __init__(self, name, usernameList, threads, sendQueue, sessionDict, gameStart):
         threading.Thread.__init__(self)
         self.name = name
         self.threads = threads
         self.sendQueue = sendQueue
         self.sessionDict = sessionDict
-        global gameStart
+        self.gameStart = gameStart
 
     def run(self):
         while True:
@@ -361,22 +495,20 @@ class WriteThread (threading.Thread):
                             #Todo: Custom message(session messages)
                             except socket.error:
                                 self.csoc.close()
+                                #Todo: will be removed from session
                                 break
-
-                    if gameStart:
-                        cards = createCards()
-                        cards = random.shuffle(cards)
-
-                        #Threads who are playing in the game
-                        gameThread = self.sessionDict[gameStart]
-                        self.sessionDict = {}
-
-                        for clientThread in gameThread:
-                            clientThread.csoc.send("STR " + gameStart)
-
+                else:
+                    temp = queue_message.message
+                    try:
+                        queue_message.receiver.csoc.send(temp)
+                    except socket.error:
+                        self.csoc.close()
+                        break
 
 class Message(object):
-    def __init__(self, type, messagebody):
+    def __init__(self, type, messagebody, receiver = None):
+        if receiver:
+            self.receiver = receiver
         self.type = type    #type = 1; send to all, type=0; custom
         self.message = messagebody
 
@@ -394,12 +526,14 @@ sendQueue = Queue.Queue()
 sessionDict = {}
 sessionTimer = {}
 
-gameThread = []
+card = [[],[],[]]
+
+gt = GameThread("GameThread", sessionDict, gameStart, gameSessionId, sendQueue)
+gt.start()
 
 #Async message (Todo: thread wait)
-wt = WriteThread("WriteThread", usernameList, threads, sendQueue, sessionDict)
+wt = WriteThread("WriteThread", usernameList, threads, sendQueue, sessionDict, gameStart)
 wt.start()
-
 
 ssoc.listen(5)
 
@@ -409,7 +543,7 @@ while True:
     print 'Got connection from', addr
     csoc.send('Thank you for connecting!')
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict)
+    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, gameStart, card)
     ct.start()
 
 ssoc.close()
