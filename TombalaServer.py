@@ -9,13 +9,16 @@ import Queue
 import random
 import time
 
-SessionNum = 0
+#SessionNum = 0
 gameSessionId = ""
 
+# Class Name: GameThread
+# Description : This class for game states in the tombala
 class GameThread (threading.Thread):
-    def __init__(self, name, sessionDict, gameSessionId, sendQueue):
+    def __init__(self, name, condition, sessionDict, gameSessionId, sendQueue):
         threading.Thread.__init__(self)
         self.name
+        self.condition = condition
         self.sessionDict = sessionDict
         self.gameState = 0
         self.gameSessionId = gameSessionId
@@ -46,13 +49,16 @@ class GameThread (threading.Thread):
         tombalaCard9 = [['9','12','34','54','73'],['19','24','44','66','84'],['6','24','35','57','70']]
         tombalaCardList.append(tombalaCard9)
 
-        #random.shuffle(tombalaCardList)
+        random.shuffle(tombalaCardList)
         return tombalaCardList
 
     def randomNumber(self):
-        #luckyNum = range(1,91,1)
-        #random.shuffle(luckyNum)
-        luckyNum = [1,20,40,64,71,10,30,56,79,88,2,23,46,68,87,100]
+
+        luckyNum = range(1,91,1)
+        random.shuffle(luckyNum)
+
+        #Test data
+        #luckyNum = [1,20,40,64,71,10,30,56,79,88,2,23,46,68,87,100]
         return luckyNum
 
     def run(self):
@@ -61,21 +67,31 @@ class GameThread (threading.Thread):
         nextNumIndex = 0
         while True:
             #The state, to control if a session meets requirement
+
+            #The state waiting for sessions
             if self.gameState == 0:
+                condition.acquire()
                 for session in self.sessionDict:
-                    if len(self.sessionDict[session]) >= 1:
+                    #Game shall not start less than 4 people
+                    if len(self.sessionDict[session]) >= 2:
                         self.gameSessionId = session
                         response = "STR " + session
                         messageType = 1
                         message = Message(messageType,response)
                         self.sendQueue.put(message)
                         self.gameState = 1
+                condition.release()
                 time.sleep(5)
+
+            #The state waiting for STA message from gamer to start game
             elif self.gameState == 1:
                 result = True
+                condition.acquire()
                 for gamer in self.sessionDict[self.gameSessionId]:
                     result &= gamer.inGame
+                condition.release()
                 if result:
+                    self.counter1 = 0
                     self.gameState = 2
                     gameStart = True
                     luckNumbers = self.randomNumber()
@@ -83,13 +99,15 @@ class GameThread (threading.Thread):
                 else:
                     time.sleep(5)
                     self.counter1 += 1
-                    if self.counter1 == 3:
+                    if self.counter1 == 5:
                         self.gameState = 4
 
+            #The state to give cards
             elif self.gameState == 2:
                 cardList = self.createCards()
                 i = 0
                 messageBody = ""
+                condition.acquire()
                 for gamer in self.sessionDict[self.gameSessionId]:
                     gamer.card = cardList[i]
                     i += 1
@@ -99,22 +117,27 @@ class GameThread (threading.Thread):
                         messageBody += ","
                     messageBody = messageBody[:-1]
                     messageBody += ";"
-
+                condition.release()
                 messageBody = messageBody[:-1]
 
+                condition.acquire()
                 for gamer in self.sessionDict[self.gameSessionId]:
                     response = "APC " + messageBody
                     messageType = 0
                     message = Message(messageType,response, gamer)
                     self.sendQueue.put(message)
-
+                condition.release()
                 self.gameState = 3
 
+            #The state of playing the game
             elif self.gameState == 3:
                 result = True
+                condition.acquire()
                 for gamer in self.sessionDict[self.gameSessionId]:
                     result &= gamer.readyFlag
+                condition.release()
                 if result:
+                    self.counter2 = 0
                     lck = luckNumbers[nextNumIndex]
                     nextNumIndex += 1
                     response = "NMB " + str(lck)
@@ -122,6 +145,7 @@ class GameThread (threading.Thread):
                     message = Message(messageType,response)
                     global gameSituation
                     gameSituation = ""
+                    condition.acquire()
                     for gamer in self.sessionDict[self.gameSessionId]:
                         gamer.coverNum(str(lck))
 
@@ -138,7 +162,6 @@ class GameThread (threading.Thread):
 
                         if gamer.tmbn:
                             gameSituation += gamer.nickname + ",3"
-                            #todo general msg
                             response = "SAY" + gamer.nickname + " won !!!" + '\n' + "Get ready for next round !!!"
                             messageType = 1
                             message = Message(messageType,response)
@@ -149,11 +172,11 @@ class GameThread (threading.Thread):
                         message = Message(messageType,response,gamer)
                         gamer.readyFlag = False
                         self.sendQueue.put(message)
-
+                    condition.release()
                 else:
                     time.sleep(2)
                     self.counter2 += 1
-                    if self.counter2 == 10:
+                    if self.counter2 == 20:
                         self.gameState = 4
 
             #Finalizing or cleaning state
@@ -162,19 +185,27 @@ class GameThread (threading.Thread):
                 gameStart = False
                 self.counter1 = 0
                 self.counter2 = 0
+                condition.acquire()
                 for gamer in self.sessionDict[self.gameSessionId]:
                     gamer.removeFromSession()
+                self.gameSessionId = ""
+                condition.release()
                 response = "DRP " + self.gameSessionId
                 messageType = 1
                 message = Message(messageType, response)
-                self.sessionDict.pop(self.gameSessionId,None)
-                self.gameSessionId = ""
+                condition.acquire()
+                self.sessionDict.pop(self.gameSessionId, None)
+                condition.release()
+
                 print response
                 self.sendQueue.put(message)
 
+# Class Name: ClientThread
+# Description : This class for threads of new connected client
 class ClientThread (threading.Thread):
-    def __init__(self, threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, card):
+    def __init__(self, threadId, condition, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, card):
         threading.Thread.__init__(self)
+        self.condition = condition
         self.thredId = threadId
         self.usernameList = usernameList
         self.csoc = csoc
@@ -194,13 +225,21 @@ class ClientThread (threading.Thread):
         self.scn = False
         self.tmb = False
         self.tmbn = False
+        self.removed = False
         self.gameSessionId = gameSessionId
         self.card = card
         self.gameSituation = gameSituation
 
     def removeFromSession(self):
-        self.sessionDict[self.joinedSession].remove(self)
-        self.joinedSession = ""
+        if not self.removed:
+            self.removed = True
+            try:
+                self.sessionDict[self.joinedSession].remove(self)
+            except ValueError:
+                pass
+            if not self.sessionDict[self.joinedSession]:
+                self.sessionDict.pop(self.joinedSession, None)
+            self.joinedSession = ""
 
     def coverNum(self, num):
         for row in self.card:
@@ -216,10 +255,13 @@ class ClientThread (threading.Thread):
         for row in self.card:
             if ''.join(row) == "00000":
                 cnkCounter +=1
+        #Check cinko 1
         if cnkCounter == 1:
             self.fc = True
+        #Check cinko 2
         elif cnkCounter == 2:
             self.sc = True
+        #Check Tombala
         elif cnkCounter == 3:
             self.tmb = True
         else:
@@ -228,13 +270,14 @@ class ClientThread (threading.Thread):
             self.tmb = False
 
     def incoming_parser(self, data):
-
-        #Todo: Before csoc.send check csoc is connected
+        global SessionNum
         #The case, user has already logged in
         if self.nickname:
+
             #The case game has started
             global gameStart
             if gameStart:
+
                 #The case, message has less than three-character length
                 if len(data) < 3:
                     response = "ERR"
@@ -255,8 +298,18 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: Keep game thread (includes card, situation, ready for next)
                     self.readyFlag = True
+
+                #The case, communication ends
+                if data[0:3] == "QUI":
+                    if len(rest) > 0:
+                        response = "ERR"
+                        self.csoc.send(response)
+                        return
+                    response = "BYE " + self.nickname
+                    self.csoc.send(response)
+                    self.exitFlag = 1
+                    return
 
                 #The case, cinko request
                 if data[0:3] == "CNK":
@@ -300,6 +353,7 @@ class ClientThread (threading.Thread):
                         response = "TBA"
                     else:
                         response = "TBR"
+
                     #General message for accept
                     self.csoc.send(response)
 
@@ -309,14 +363,12 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: Take situation from gameThread
                     global gameSituation
                     response = "INF " + gameSituation[:-1]
                     self.csoc.send(response)
 
             #The case, game has not started
             else:
-                #ToDo: Implement All Protocol Messages
                 #The case, message has less than three-character length
                 if len(data) < 3:
                     response = "ERR"
@@ -337,7 +389,6 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: Main thread update, usernamelist update
                     response = "BYE " + self.nickname
                     self.csoc.send(response)
                     self.exitFlag = 1
@@ -349,7 +400,6 @@ class ClientThread (threading.Thread):
                         response = "ERR"
                         self.csoc.send(response)
                         return
-                    #Todo: get session list dictionary
                     sessionMessage = " "
                     for session in self.sessionDict:
                         sessionMessage += session + ":"
@@ -367,7 +417,6 @@ class ClientThread (threading.Thread):
                         self.csoc.send(response)
                         return
                     #Create new session
-                    global SessionNum
                     if self.joinedSession:
                         response = "CSR"
                         self.csoc.send(response)
@@ -379,6 +428,7 @@ class ClientThread (threading.Thread):
                         self.joinedSession = dkey
                         self.sessionDict[dkey] = sessionUserList
                         response = "CSA " + dkey
+                        self.removed = False
                         self.csoc.send(response)
 
                 #The case, joining existing session request
@@ -386,8 +436,6 @@ class ClientThread (threading.Thread):
                     if len(rest) == 0:
                         response = "ERR"
                         self.csoc.send(response)
-                    #Todo: check if the game started
-                    #Todo: else search sessionId in the dictionary and check it, send response according to it
                     splitted = rest.split(":")
                     #Wrong type of message
                     if len(splitted) != 2:
@@ -409,6 +457,7 @@ class ClientThread (threading.Thread):
                                     self.sessionDict[sessionID].append(self)
                                     self.joinedSession = sessionID
                                     response = "JNA " + sessionID
+                                    self.removed = False
                                     self.csoc.send(response)
 
                         #Wrong sessionID
@@ -426,12 +475,9 @@ class ClientThread (threading.Thread):
                     if self.joinedSession:
                         response = "QGA"
                         self.csoc.send(response)
-                        for self.joinedSession in self.sessionDict:
-                            self.sessionDict[self.joinedSession].remove(self)
-                            if not self.sessionDict[self.joinedSession]:
-                                self.sessionDict.pop(self.joinedSession,None)
-                            break
-                        self.joinedSession = ""
+                        condition.acquire()
+                        self.removeFromSession()
+                        condition.release()
                     else:
                         response = "QGR"
                         self.csoc.send(response)
@@ -451,6 +497,7 @@ class ClientThread (threading.Thread):
 
         #The case, user has not logged in yet
         else:
+
             #The case, message has less than three-character length
             if len(data) < 3:
                 response = "ERL"
@@ -467,7 +514,6 @@ class ClientThread (threading.Thread):
 
             #The case, client registration
             if data[0:3] == "USR":
-                #ToDo: nickname validity check(existing or typo error)
                 if rest in self.usernameList:
                     response = "REJ " + self.nickname
                     self.csoc.send(response)
@@ -492,25 +538,35 @@ class ClientThread (threading.Thread):
                     messageType = 1
                     message = Message(messageType,response)
                     self.sendQueue.put(message)
-                #ToDo: check this user is currently in the system
                 else:
                     response = "REJ"
                     self.csoc.send(response)
+
+            #If not registered user
             else:
                 response = "ERL"
                 self.csoc.send(response)
 
     def run(self):
+        global gameStart
         while True:
             try:
                 data = self.csoc.recv(1024)
                 data = data.rstrip('\r\n')
-                if self.gameSessionId and not self.inGame:
+
+                #If the player is not in the game and game start, send OUT
+                if gameStart and not self.inGame:
                     self.csoc.send("OUT")
                 else:
+                    condition.acquire()
                     self.incoming_parser(data)
+                    condition.release()
+                    #Quit with QUI command
                     if self.exitFlag == 1:
-                        threads.remove(self)
+                        condition.acquire()
+                        self.removeFromSession()
+                        condition.release()
+                        self.threads.remove(self)
                         response = "SAY " + self.nickname + " is disconnected"
                         messageType = 1
                         message = Message(messageType,response)
@@ -518,21 +574,26 @@ class ClientThread (threading.Thread):
                         self.csoc.close()
                         return
             except socket.error:
-                threads.remove(self)
+                condition.acquire()
+                self.removeFromSession()
+                condition.release()
+                self.threads.remove(self)
                 response = "SAY " + self.nickname + " is disconnected"
                 messageType = 1
-                message = Message(messageType,response)
+                message = Message(messageType, response)
                 self.sendQueue.put(message)
                 self.csoc.close()
                 return
 
-
+# Class Name: WriteThread
+# Description : This class for sending async queue messages
 class WriteThread (threading.Thread):
-    def __init__(self, name, usernameList, threads, sendQueue, sessionDict):
+    def __init__(self, condition, name, usernameList, threads, sendQueue, sessionDict):
         threading.Thread.__init__(self)
         self.name = name
         self.threads = threads
         self.sendQueue = sendQueue
+        self.condition = condition
         self.sessionDict = sessionDict
 
     def run(self):
@@ -542,21 +603,26 @@ class WriteThread (threading.Thread):
                 #General Message
                 if queue_message.type == 1:
                     temp = queue_message.message
-                    for clientThread in threads:
+                    for clientThread in self.threads:
                         if clientThread.nickname:
                             try:
                                 clientThread.csoc.send(temp)
-                            #Todo: Custom message(session messages)
                             except socket.error:
-                                self.csoc.close()
-                                #Todo: will be removed from session
+                                condition.acquire()
+                                clientThread.removeFromSession()
+                                condition.release()
+                                clientThread.csoc.close()
                                 break
                 else:
                     temp = queue_message.message
                     try:
                         queue_message.receiver.csoc.send(temp)
                     except socket.error:
-                        self.csoc.close()
+                        condition.acquire()
+                        queue_message.receiver.removeFromSession()
+                        condition.release()
+
+                        queue_message.receiver.csoc.close()
                         break
 
 class Message(object):
@@ -576,6 +642,9 @@ threads = []
 usernameList = []
 sendQueue = Queue.Queue()
 
+global SessionNum
+SessionNum = 0
+
 global gameStart
 gameStart = False
 
@@ -586,12 +655,12 @@ sessionTimer = {}
 card = [[],[],[]]
 
 gameSituation = ""
+condition = threading.Condition()
 
-gt = GameThread("GameThread", sessionDict, gameSessionId, sendQueue)
+gt = GameThread("GameThread", condition, sessionDict, gameSessionId, sendQueue)
 gt.start()
 
-#Async message (Todo: thread wait)
-wt = WriteThread("WriteThread", usernameList, threads, sendQueue, sessionDict)
+wt = WriteThread("WriteThread", condition, usernameList, threads, sendQueue, sessionDict)
 wt.start()
 
 ssoc.listen(5)
@@ -602,7 +671,7 @@ while True:
     print 'Got connection from', addr
     csoc.send("SAY " + "Thank you for connecting!")
     threadId += 1
-    ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, card)
+    ct = ClientThread(threadId, condition, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, card)
     ct.start()
 
 ssoc.close()
