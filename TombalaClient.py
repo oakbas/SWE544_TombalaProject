@@ -88,13 +88,10 @@ class ReadThread (threading.Thread):
                 response = "ERR"
                 self.ssoc.send(response)
                 return
-
-            #Todo: Handle SOK message on server side
-            #response = "SOK"
-            #self.ssoc.send(response)
             screenMsg = "General Message: " + rest
             self.screenQueue.put(screenMsg)
 
+        #The case, list session
         elif data[0:3] == "LSA":
             if len(rest) == 0:
                 response = "ERR"
@@ -104,6 +101,7 @@ class ReadThread (threading.Thread):
             splitted = rest.split(";")
             self.sessionQueue.put(splitted)
 
+        #The case, join new session request is accepted
         elif data[0:3] == "JNA":
             if len(rest) > 0:
                 response = "ERR"
@@ -113,6 +111,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Join accepted"
             self.screenQueue.put(screenMsg)
 
+        #The case, join new session request is rejected
         elif data[0:3] == "JNR":
             if len(rest) == 0:
                 response = "ERR"
@@ -122,6 +121,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Join rejected, try again"
             self.screenQueue.put(screenMsg)
 
+        #The case, create new session request is accepted
         elif data[0:3] == "CSA":
             if len(rest) == 0:
                 response = "ERR"
@@ -131,6 +131,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Session created"
             self.screenQueue.put(screenMsg)
 
+        #The case, create new session request is accepted
         elif data[0:3] == "CSR":
             if len(rest) > 0:
                 response = "ERR"
@@ -140,15 +141,17 @@ class ReadThread (threading.Thread):
             screenMsg = "Session could not be created, try again"
             self.screenQueue.put(screenMsg)
 
+        #The case, join from session accepted
         elif data[0:3] == "QGA":
             if len(rest) > 0:
                 response = "ERR"
                 self.ssoc.send(response)
                 return
 
-            screenMsg = "You exit game"
+            screenMsg = "You exit from session"
             self.screenQueue.put(screenMsg)
 
+        #The case, starting game notification
         elif data[0:3] == "STR":
             if len(rest) == 0:
                 response = "ERR"
@@ -162,6 +165,7 @@ class ReadThread (threading.Thread):
             print(response)
             self.ssoc.send(response)
 
+        #The case. informing other user situation
         elif data[0:3] == "INF":
             if len(rest) == 0:
                 response = "ERR"
@@ -174,7 +178,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Situation of the users " + rest
             self.screenQueue.put(screenMsg)
 
-
+        #The case, cinko accepted
         elif data[0:3] == "CNA":
             if len(rest) > 0:
                 response = "ERR"
@@ -184,6 +188,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Cinko is accepted"
             self.screenQueue.put(screenMsg)
 
+        #The case, cinko rejected
         elif data[0:3] == "CNR":
             if len(rest) > 0:
                 response = "ERR"
@@ -193,6 +198,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Cinko is rejected, please control your card"
             self.screenQueue.put(screenMsg)
 
+        #The case, tombala accepted
         elif data[0:3] == "TBA":
             if len(rest) > 0:
                 response = "ERR"
@@ -202,6 +208,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Tombala is accepted"
             self.screenQueue.put(screenMsg)
 
+        #The case, tombala rejected
         elif data[0:3] == "TBR":
             if len(rest) > 0:
                 response = "ERR"
@@ -211,6 +218,7 @@ class ReadThread (threading.Thread):
             screenMsg = "Tombala is rejected, please control your card"
             self.screenQueue.put(screenMsg)
 
+        #The case, new number
         elif data[0:3] == "NMB":
             if len(rest) == 0:
                 response = "ERR"
@@ -220,6 +228,7 @@ class ReadThread (threading.Thread):
             screenMsg = "New lucky number is " + rest
             self.screenQueue.put(screenMsg)
 
+        #The case, all players cards
         elif data[0:3] == "APC":
             if len(rest) == 0:
                 response = "ERR"
@@ -252,7 +261,7 @@ class WriteThread (threading.Thread):
 
     def run(self):
         while True:
-            #self.condition.acquire()
+            self.condition.acquire()
             if self.sendQueue.qsize() > 0:
                 queue_message = self.sendQueue.get()
                 try:
@@ -261,19 +270,20 @@ class WriteThread (threading.Thread):
                 except socket.error:
                     self.ssoc.close()
                     break
-            #else:
-                #self.condition.wait()
+            else:
+                self.condition.wait()
 
-            #self.condition.release()
+            self.condition.release()
 
 class ClientDialog(QDialog):
 
-    def __init__(self, sendQueue, screenQueue, sessionQueue, sitQueue, cardQueue):
+    def __init__(self, condition, sendQueue, screenQueue, sessionQueue, sitQueue, cardQueue):
         self.sendQueue = sendQueue
         self.screenQueue = screenQueue
         self.sessionQueue = sessionQueue
         self.sitQueue = sitQueue
         self.cardQueue = cardQueue
+        self.condition = condition
 
         # create a Qt application --- every PyQt app needs one
         self.qt_app = QApplication(sys.argv)
@@ -306,7 +316,7 @@ class ClientDialog(QDialog):
         # The send button
         self.send_button = QPushButton('&Send')
 
-        #Num cov
+        #Num cov textbox
         self.numToCover = QLineEdit("", self)
 
         #Cover button
@@ -328,7 +338,7 @@ class ClientDialog(QDialog):
 
         # The myCard section
         self.myCardList = QListView()
-        self.myCardList.setWindowTitle('Session List')
+        self.myCardList.setWindowTitle('My Card List')
 
         # Connect the Go button to its callback
         self.send_button.clicked.connect(self.outgoing_parser)
@@ -449,16 +459,25 @@ class ClientDialog(QDialog):
     def outgoing_parser(self):
         data = self.sender.text()
 
+        condition.acquire()
         self.sendQueue.put(data)
+        condition.notify_all()
+        condition.release()
         self.sender.clear()
 
     def send_ready(self):
         message = "RDY"
+        condition.acquire()
         self.sendQueue.put(message)
+        condition.notify_all()
+        condition.release()
 
     def close_game(self):
         message = "QUI"
+        condition.acquire()
         self.sendQueue.put(message)
+        condition.notify_all()
+        condition.release()
 
     def cover_num(self):
         num = self.numToCover.text()
@@ -470,6 +489,14 @@ class ClientDialog(QDialog):
                     row[i] = "X"
                     break
                 i += 1
+
+        screenMessage = ""
+        for row in self.myCard:
+            for item in row:
+                screenMessage += item + " "
+
+        self.screenQueue.put(screenMessage)
+
 
         print self.myCard
 
@@ -491,9 +518,9 @@ sessionQueue = Queue.Queue()
 sitQueue = Queue.Queue()
 cardQueue = Queue.Queue()
 
-app = ClientDialog(sendQueue, screenQueue, sessionQueue, sitQueue, cardQueue)
-
 condition = threading.Condition()
+
+app = ClientDialog(condition, sendQueue, screenQueue, sessionQueue, sitQueue, cardQueue)
 
 # start threads
 rt = ReadThread("ReadThread", ssoc, condition, sendQueue, screenQueue, sessionQueue, sitQueue, cardQueue)
