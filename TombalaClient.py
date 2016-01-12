@@ -193,6 +193,24 @@ class ReadThread (threading.Thread):
             screenMsg = "Cinko is rejected, please control your card"
             self.screenQueue.put(screenMsg)
 
+        elif data[0:3] == "TBA":
+            if len(rest) > 0:
+                response = "ERR"
+                self.ssoc.send(response)
+                return
+
+            screenMsg = "Tombala is accepted"
+            self.screenQueue.put(screenMsg)
+
+        elif data[0:3] == "TBR":
+            if len(rest) > 0:
+                response = "ERR"
+                self.ssoc.send(response)
+                return
+
+            screenMsg = "Tombala is rejected, please control your card"
+            self.screenQueue.put(screenMsg)
+
         elif data[0:3] == "NMB":
             if len(rest) == 0:
                 response = "ERR"
@@ -407,15 +425,15 @@ class ClientDialog(QDialog):
         self.sessionList.setModel(model)
         self.sessionList.show()
 
-    def sessionPrint(self, situation):
-        model = QStandardItemModel(self.situationList)
+    def sessionPrint(self, session):
+        model = QStandardItemModel(self.sessionList)
 
-        for sit in situation:
-            item = QStandardItem(sit)
+        for ses in session:
+            item = QStandardItem(ses)
             model.appendRow(item)
 
-        self.situationList.setModel(model)
-        self.situationList.show()
+        self.sessionList.setModel(model)
+        self.sessionList.show()
 
 
     def situationPrint(self, situation):
@@ -444,15 +462,16 @@ class ClientDialog(QDialog):
 
     def cover_num(self):
         num = self.numToCover.text()
+        num = str(num)
         for row in self.myCard:
             i = 0
             for item in row:
                 if item == num:
-                    row[i] == "X"
-                    i += 1
+                    row[i] = "X"
+                    break
+                i += 1
 
         print self.myCard
-
 
     #Run the app and show the main form
     def run(self):
