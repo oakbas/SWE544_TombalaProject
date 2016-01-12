@@ -72,8 +72,8 @@ class GameThread (threading.Thread):
             if self.gameState == 0:
                 condition.acquire()
                 for session in self.sessionDict:
-                    #Game shall not start less than 4 people
-                    if len(self.sessionDict[session]) >= 2:
+                    #Game shall not start less than 3 people
+                    if len(self.sessionDict[session]) >= 3:
                         self.gameSessionId = session
                         response = "STR " + session
                         messageType = 1
