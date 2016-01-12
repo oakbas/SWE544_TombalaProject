@@ -13,6 +13,7 @@ SessionNum = 0
 gameSessionId = ""
 gameStart = False
 
+
 class GameThread (threading.Thread):
     def __init__(self, name, sessionDict, gameStart, gameSessionId, sendQueue):
         threading.Thread.__init__(self)
@@ -43,15 +44,16 @@ class GameThread (threading.Thread):
         tombalaCardList.append(tombalaCard7)
         tombalaCard8 = [['3','12','30','53','73'],['16','21','41','61','87'],['9','24','35','57','70']]
         tombalaCardList.append(tombalaCard8)
-        tombalaCard9 = [['9','12','34','54','73'],['19','24','44','66','84'],['9','24','35','57','70']]
+        tombalaCard9 = [['9','12','34','54','73'],['19','24','44','66','84'],['6','24','35','57','70']]
         tombalaCardList.append(tombalaCard9)
 
-        random.shuffle(tombalaCardList)
+        #random.shuffle(tombalaCardList)
         return tombalaCardList
 
     def randomNumber(self):
-        luckyNum = range(1,91,1)
-        random.shuffle(luckyNum)
+        #luckyNum = range(1,91,1)
+        #random.shuffle(luckyNum)
+        luckyNum = [1,20,40,64,71,10,30,56,79,88,2,23,46,68,87,100]
         return luckyNum
 
     def run(self):
@@ -62,7 +64,7 @@ class GameThread (threading.Thread):
             #The state, to control if a session meets requirement
             if self.gameState == 0:
                 for session in self.sessionDict:
-                    if len(self.sessionDict[session]) >= 2:
+                    if len(self.sessionDict[session]) >= 1:
                         self.gameSessionId = session
                         response = "STR " + session
                         messageType = 1
@@ -70,7 +72,7 @@ class GameThread (threading.Thread):
                         self.sendQueue.put(message)
                         self.gameState = 1
                     else:
-                        time.sleep(5)
+                        time.sleep(10)
             elif self.gameState == 1:
                 result = True
                 for gamer in self.sessionDict[self.gameSessionId]:
@@ -89,6 +91,7 @@ class GameThread (threading.Thread):
                         self.gameStart = False
                         self.gameSessionId = ""
             elif self.gameState == 2:
+
                 cardList = self.createCards()
                 i = 0
                 messageBody = ""
@@ -101,15 +104,17 @@ class GameThread (threading.Thread):
                         messageBody += ","
                     messageBody = messageBody[:-1]
                     messageBody += ";"
-                messageBody = messageBody[:-1]
 
-                self.gameState = 3
+                messageBody = messageBody[:-1]
 
                 for gamer in self.sessionDict[self.gameSessionId]:
                     response = "APC " + messageBody
                     messageType = 0
                     message = Message(messageType,response, gamer)
                     self.sendQueue.put(message)
+
+                time.sleep(3)
+                self.gameState = 3
 
             elif self.gameState == 3:
                 result = True
@@ -121,14 +126,32 @@ class GameThread (threading.Thread):
                     response = "NMB " + str(lck)
                     messageType = 0
                     message = Message(messageType,response)
+                    global gameSituation
+                    gameSituation = ""
                     for gamer in self.sessionDict[self.gameSessionId]:
                         gamer.coverNum(str(lck))
+                        if not gamer.fc:
+                            gameSituation += gamer.nickname + ",0"
+
+                        elif not gamer.sc and gamer.fc:
+                            gameSituation += gamer.nickname + ",1"
+
+                        elif gamer.sc and gamer.fc:
+                            gameSituation += gamer.nickname + ",2"
+
+                        elif gamer.tmb:
+                            gameSituation += gamer.nickname + ",3"
+
+                        gameSituation += ":"
+
                         message = Message(messageType,response,gamer)
                         gamer.readyFlag = False
                         self.sendQueue.put(message)
 
+                    time.sleep(2)
+
                 else:
-                    time.sleep(5)
+                    time.sleep(3)
                     counter += 1
                     if counter == 3:
                         self.gameState = 0
@@ -157,12 +180,15 @@ class ClientThread (threading.Thread):
         self.gameSessionId = gameSessionId
         self.gameStart = gameStart
         self.card = card
+        self.gameSituation = gameSituation
 
     def coverNum(self, num):
         for row in self.card:
+            i = 0
             for item in row:
-                if item == str(num):
-                    item = '0'
+                if item == num:
+                    row[i] = '0'
+                i += 1
         self.checkCnk()
 
     def checkCnk(self):
@@ -205,7 +231,7 @@ class ClientThread (threading.Thread):
 
                 #The case, gamer ready for new number
                 if data[0:3] == "RDY":
-                    if len(rest) == 0:
+                    if len(rest) > 0:
                         response = "ERR"
                         self.csoc.send(response)
                         return
@@ -251,7 +277,9 @@ class ClientThread (threading.Thread):
                         self.csoc.send(response)
                         return
                     #Todo: Take situation from gameThread
-                    response = "INF"
+                    global gameSituation
+                    response = "INF " + gameSituation[:-1]
+                    self.csoc.send(response)
 
             #The case, game has not started
             else:
@@ -300,7 +328,7 @@ class ClientThread (threading.Thread):
                     self.csoc.send(response)
 
                 #The case, creating new session request
-                elif data[0:3] == "CRT":
+                elif data[0:3] == "CRS":
                     if len(rest) > 0:
                         response = "ERR"
                         self.csoc.send(response)
@@ -349,13 +377,6 @@ class ClientThread (threading.Thread):
                                     self.joinedSession = sessionID
                                     response = "JNA " + sessionID
                                     self.csoc.send(response)
-                                    #Todo: may be removed
-                                    #if len(sessionDict[sessionID]) == 2:
-                                     #   self.gameSessionId = sessionID
-                                      #  response = "STR " + sessionID
-                                       # messageType = 1
-                                       # message = Message(messageType,response)
-                                       # self.sendQueue.put(message)
 
                         #Wrong sessionID
                         else:
@@ -389,6 +410,7 @@ class ClientThread (threading.Thread):
                         self.csoc.send(response)
                         return
                     self.inGame = True
+
                 else:
                     response = "ERR"
                     self.csoc.send(response)
@@ -528,6 +550,8 @@ sessionTimer = {}
 
 card = [[],[],[]]
 
+gameSituation = ""
+
 gt = GameThread("GameThread", sessionDict, gameStart, gameSessionId, sendQueue)
 gt.start()
 
@@ -541,7 +565,7 @@ ssoc.listen(5)
 while True:
     csoc, addr = ssoc.accept()     # Establish connection with client.
     print 'Got connection from', addr
-    csoc.send('Thank you for connecting!')
+    csoc.send("SAY " + "Thank you for connecting!")
     threadId += 1
     ct = ClientThread(threadId, usernameList, csoc, threads, sendQueue, sessionDict, gameSessionId, gameStart, card)
     ct.start()
